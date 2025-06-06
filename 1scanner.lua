@@ -1,7 +1,7 @@
 --\bunnyhop-dev/
 
 if not arg[1] then
-	print("Usage: lua 1scanner.lua <library>")
+	print("Usage: lua scannerV2.lua <library>")
 	os.exit(1)
 end
 
@@ -366,6 +366,129 @@ local function showFoundAddresses()
 	end
 end
 
+-- Smart Pattern Scanner
+local function smartPatternScan(pattern, options)
+	options = options or {}
+	local results = {}
+	
+	-- Pattern types
+	local patternTypes = {
+		EXACT = 1,      -- Exact match
+		WILDCARD = 2,   -- Wildcard match (* for any bytes)
+		RANGE = 3,      -- Range match (e.g., [00-FF])
+		FUZZY = 4       -- Fuzzy match (similar values)
+	}
+	
+	-- Parse pattern
+	local function parsePattern(pattern)
+		local parsed = {}
+		for part in pattern:gmatch("%S+") do
+			if part == "*" then
+				table.insert(parsed, {type = patternTypes.WILDCARD})
+			elseif part:match("%[(%x+)%-(%x+)%]") then
+				local min, max = part:match("%[(%x+)%-(%x+)%]")
+				table.insert(parsed, {
+					type = patternTypes.RANGE,
+					min = tonumber(min, 16),
+					max = tonumber(max, 16)
+				})
+			elseif part:match("~(%x+)") then
+				local value = part:match("~(%x+)")
+				table.insert(parsed, {
+					type = patternTypes.FUZZY,
+					value = tonumber(value, 16),
+					tolerance = options.fuzzyTolerance or 5
+				})
+			else
+				table.insert(parsed, {
+					type = patternTypes.EXACT,
+					value = tonumber(part, 16)
+				})
+			end
+		end
+		return parsed
+	end
+	
+	-- Match pattern
+	local function matchPattern(address, parsedPattern)
+		local memory = foundMemory[address]
+		if not memory then
+			return false
+		end
+		
+		-- Convert memory string to bytes
+		local bytes = {}
+		for byte in memory:gmatch("%S+") do
+			table.insert(bytes, tonumber(byte, 16))
+		end
+		
+		-- Check if we have enough bytes
+		if #bytes < #parsedPattern then
+			return false
+		end
+		
+		-- Match each byte
+		for i, part in ipairs(parsedPattern) do
+			if part.type == patternTypes.EXACT then
+				if bytes[i] ~= part.value then
+					return false
+				end
+			elseif part.type == patternTypes.WILDCARD then
+				-- Skip this byte
+			elseif part.type == patternTypes.RANGE then
+				if bytes[i] < part.min or bytes[i] > part.max then
+					return false
+				end
+			elseif part.type == patternTypes.FUZZY then
+				if math.abs(bytes[i] - part.value) > part.tolerance then
+					return false
+				end
+			end
+		end
+		return true
+	end
+	
+	-- Main scanning logic
+	local parsedPattern = parsePattern(pattern)
+	for address, memory in pairs(foundMemory) do
+		if matchPattern(address, parsedPattern) then
+			table.insert(results, {
+				address = address,
+				value = memory,
+				confidence = 100
+			})
+		end
+	end
+	
+	return results
+end
+
+-- Add new command to menu
+local function smartScan()
+	print("\n=== Smart Pattern Scanner ===")
+	print("Pattern format examples:")
+	print("  Exact: 48 89 5C 24 08")
+	print("  Wildcard: 48 * 5C 24 *")
+	print("  Range: 48 [00-FF] 5C 24 [00-FF]")
+	print("  Fuzzy: 48 ~5C 24 ~08")
+	print("\nEnter pattern to scan:")
+	io.write("> ")
+	local pattern = io.read()
+	
+	print("\nScanning with pattern: " .. pattern)
+	local results = smartPatternScan(pattern)
+	
+	if #results > 0 then
+		print("\nFound " .. #results .. " matches:")
+		for i, result in ipairs(results) do
+			print(string.format("%d. Address: %s", i, result.address))
+			print("   Value: " .. result.value)
+		end
+	else
+		print("No matches found.")
+	end
+end
+
 local function main()
 	math.randomseed(os.time())
 
@@ -383,6 +506,7 @@ local function main()
 		print("[6] LIBRARY INFO")
 		print("[7] DISASSEMBLE ADDRESS")
 		print("[8] ANALYZE ADDRESS")
+		print("[9] SMART PATTERN SCAN")
 		print("[0] EXIT")
 		io.write("\n> ")
 
@@ -405,6 +529,8 @@ local function main()
 			disassembleAddress()
 		elseif choice == 8 then
 			analyzeAddress()
+		elseif choice == 9 then
+			smartScan()
 		elseif choice == 0 then
 			break
 		else
