@@ -1,7 +1,7 @@
 --\bunnyhop-dev/
 
 if not arg[1] then
-	print("Usage: lua scannerV2.lua <library>")
+	print("Usage: lua 1scanner.lua <library>")
 	os.exit(1)
 end
 
